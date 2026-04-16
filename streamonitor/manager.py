@@ -147,31 +147,31 @@ class Manager(Thread):
         maxlen = max([len(s.username) for s in self.streamers] or [0])
         termwidth = terminaltables.terminal_io.terminal_size()[0]
         table_nx = math.floor(termwidth/(maxlen+3))
-        output = ''
-        output += 'Status:\n'
+        output = []
+        output.append('Status:\n')
 
         for site in LOADED_SITES:
-            output += site.site + '\n'
-            output += ('+' + '-'*(maxlen+2))*table_nx + '+\n'
+            output.append(site.site + '\n')
+            output.append(('+' + '-'*(maxlen+2))*table_nx + '+\n')
             site_name = site.site
             i = 0
             for streamer in self.streamers:
                 if streamer.site == site_name:
-                    output += '!'
+                    output.append('!')
                     status_color = None
                     status = streamer.sc
                     if status == Status.PUBLIC: status_color = 'green'
                     if status == Status.PRIVATE: status_color = 'magenta'
                     if status == Status.ERROR: status_color = 'red'
                     if not streamer.running: status_color = 'grey'
-                    output += colored(' ' + streamer.username + ' '*(maxlen-len(streamer.username)) + ' ', status_color)
+                    output.append(colored(' ' + streamer.username + ' '*(maxlen-len(streamer.username)) + ' ', status_color))
                     i += 1
                     if i == table_nx:
-                        output += '!\n'
+                        output.append('!\n')
                         i = 0
             for r in range(i, table_nx):
-                output += '! ' + ' ' * maxlen + ' '
-            output += '!\n'
-            output += ('+' + '-'*(maxlen+2))*table_nx + '+\n'
-            output += '\n'
-        return output
+                output.append('! ' + ' ' * maxlen + ' ')
+            output.append('!\n')
+            output.append(('+' + '-'*(maxlen+2))*table_nx + '+\n')
+            output.append('\n')
+        return "".join(output)
