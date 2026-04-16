@@ -12,7 +12,9 @@ from threading import Thread
 import requests
 import requests.cookies
 
-from streamonitor.enums import Status, COUNTRIES, Gender, GENDER_DATA
+from streamonitor.enums.status import Status
+from streamonitor.enums.gender import Gender, GENDER_DATA
+from streamonitor.enums.countries import COUNTRIES
 import streamonitor.log as log
 from parameters import DOWNLOADS_DIR, DEBUG, WANTED_RESOLUTION, WANTED_RESOLUTION_PREFERENCE, CONTAINER, HTTP_USER_AGENT
 from streamonitor.downloaders.ffmpeg import getVideoFfmpeg

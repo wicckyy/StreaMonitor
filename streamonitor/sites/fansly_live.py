@@ -1,5 +1,5 @@
 from streamonitor.bot import RoomIdBot
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 
 
 class FanslyLive(RoomIdBot):

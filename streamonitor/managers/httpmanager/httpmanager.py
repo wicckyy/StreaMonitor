@@ -12,7 +12,7 @@ import streamonitor.log as log
 from functools import wraps
 from secrets import compare_digest
 from streamonitor.bot import Bot, LOADED_SITES
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 from streamonitor.manager import Manager
 from streamonitor.managers.outofspace_detector import OOSDetector
 from streamonitor.utils import human_file_size

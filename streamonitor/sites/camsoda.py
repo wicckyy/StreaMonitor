@@ -1,6 +1,6 @@
 import requests
 from streamonitor.bot import Bot
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 
 
 class CamSoda(Bot):
