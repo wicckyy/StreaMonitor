@@ -36,12 +36,17 @@ class VideoData:
     @property
     def mimetype(self):
         mimetype = 'application/octet-stream'
+
+        try:
+            guessed_type = mimetypes.guess_type(self.abs_path)[0]
+            if guessed_type:
+                mimetype = guessed_type
+        except Exception as e:
+            logger.error(e)
+
         # if we lie about this, chrome will play it
         # need to look at alternatives for firefox
         if self.abs_path is not None and self.abs_path.lower().endswith('.mkv'):
             mimetype = 'video/mp4'
-        try:
-            mimetype = mimetypes.guess_type(self.abs_path)[0]
-        except Exception as e:
-            logger.error(e)
+
         return mimetype
