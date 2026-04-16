@@ -355,9 +355,6 @@ class Bot(Thread):
             traceback.print_tb(e.__traceback__)
             return None
 
-    def getVideoUrl(self):
-        pass
-
     def progressInfo(self, p):
         if p['status'] == 'downloading':
             self.log("Downloading " + str(round(float(p['downloaded_bytes']) / float(p['total_bytes']) * 100, 1)) + "%")
