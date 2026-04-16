@@ -2,6 +2,7 @@ from itertools import islice
 from typing import cast, Union
 
 from flask import Flask, make_response, render_template, request, send_from_directory, Response
+from waitress import serve
 import os
 import json
 import logging
@@ -454,4 +455,4 @@ class HTTPManager(Manager):
             } | filter_context
             return render_template('streamers_result.html.jinja', **context), status_code
 
-        app.run(host=WEBSERVER_HOST, port=WEBSERVER_PORT)
+        serve(app, host=WEBSERVER_HOST, port=WEBSERVER_PORT)
