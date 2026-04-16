@@ -25,7 +25,7 @@ def main():
 
     streamers = config.loadStreamers()
 
-    clean_exit = CleanExit(streamers)
+    CleanExit(streamers)
 
     oos_detector = OOSDetector(streamers)
     oos_detector.start()
