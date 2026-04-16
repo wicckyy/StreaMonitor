@@ -17,8 +17,6 @@ _logger = log.Logger("utils")
 
 def get_streamer_context(streamer: Bot, sort_by_size: bool, play_video: str, user_agent: str) -> StreamerContext:
     videos: Dict[str, VideoData] = {}
-    has_error = False
-    recordings_error_message = None
     for video in streamer.video_files:
         videos[video.filename] = video
     if sort_by_size:
@@ -33,8 +31,8 @@ def get_streamer_context(streamer: Bot, sort_by_size: bool, play_video: str, use
         'refresh_freq': WEB_STATUS_FREQUENCY,
         'videos': videos,
         'total_size': streamer.video_files_total_size,
-        'has_error': has_error,
-        'recordings_error_message': recordings_error_message,
+        'has_error': False,
+        'recordings_error_message': None,
         'theater_mode': WEB_THEATER_MODE,
         'confirm_deletes': confirm_deletes(user_agent),
     }
