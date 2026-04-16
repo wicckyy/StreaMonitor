@@ -1,7 +1,8 @@
 import re
 import requests
 from streamonitor.bot import Bot
-from streamonitor.enums import Status, Gender
+from streamonitor.enums.status import Status
+from streamonitor.enums.gender import Gender
 
 
 class Chaturbate(Bot):

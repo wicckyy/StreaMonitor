@@ -9,7 +9,7 @@ import streamonitor.log as log
 from streamonitor.bot import Bot, LOADED_SITES
 from streamonitor.managers.outofspace_detector import OOSDetector
 
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 
 
 class Manager(Thread):

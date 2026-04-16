@@ -1,7 +1,7 @@
 import time
 import requests
 from streamonitor.bot import RoomIdBot
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 
 
 # Site of Hungarian group AdultPerformerNetwork

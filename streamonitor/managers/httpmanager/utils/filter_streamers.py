@@ -1,7 +1,7 @@
 from typing import List, cast, Union
 
 from streamonitor.bot import Bot
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 
 
 def filter_streamers(streamer: Bot, username_filter: Union[str, None], site_filter: Union[str, None], status_filter: Union[str, None]):

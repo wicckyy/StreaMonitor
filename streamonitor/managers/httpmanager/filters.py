@@ -1,4 +1,4 @@
-from streamonitor.enums import Status
+from streamonitor.enums.status import Status
 from streamonitor.managers.httpmanager.mappers import web_status_lookup, status_icons_lookup
 
 
