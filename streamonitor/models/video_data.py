@@ -39,7 +39,7 @@ class VideoData:
         # if we lie about this, chrome will play it
         # need to look at alternatives for firefox
         if self.abs_path is not None and self.abs_path.lower().endswith('.mkv'):
-            mimetype = 'video/mp4'
+            return 'video/mp4'
         try:
             mimetype = mimetypes.guess_type(self.abs_path)[0]
         except Exception as e:
