@@ -188,10 +188,20 @@ body {
 .form-control:-webkit-autofill,
 .form-control:-webkit-autofill:hover,
 .form-control:-webkit-autofill:focus,
-.form-control:-webkit-autofill:active {
-	-webkit-box-shadow: 0 0 0 30px var(--secondary_background) inset !important;
+.form-control:-webkit-autofill:active,
+.form-select:-webkit-autofill,
+.form-select:-webkit-autofill:hover,
+.form-select:-webkit-autofill:focus,
+.form-select:-webkit-autofill:active {
+	-webkit-box-shadow: 0 0 0 1000px var(--secondary_background) inset !important;
 	-webkit-text-fill-color: var(--secondary_foreground) !important;
-	box-shadow: 0 0 0 30px var(--secondary_background) inset !important;
+	box-shadow: 0 0 0 1000px var(--secondary_background) inset !important;
+	transition: background-color 5000s ease-in-out 0s;
+}
+
+.form-control:-webkit-autofill:focus,
+.form-select:-webkit-autofill:focus {
+	box-shadow: 0 0 0 1000px var(--secondary_background) inset, 0 0 0 0.25rem rgba(0, 173, 181, 0.25) !important;
 }
 
 /* Card header styling */
