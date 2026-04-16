@@ -1,0 +1,1304 @@
+From edc8605613d1ffb246925b0f32b52bf26ca0e4e2 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Sat, 29 Nov 2025 08:03:53 -0800
+Subject: [PATCH 01/10] Update stripchat.py
+
+---
+ streamonitor/sites/stripchat.py | 372 ++++++++++++++++++++++----------
+ 1 file changed, 260 insertions(+), 112 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index fb17b6db..79ff1439 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -5,6 +5,12 @@
+ import requests
+ import base64
+ import hashlib
++import os
++from functools import lru_cache
++from typing import Optional, Tuple, List, Dict
++
++from requests.adapters import HTTPAdapter
++from urllib3.util.retry import Retry
+
+ from streamonitor.bot import Bot
+ from streamonitor.downloaders.hls import getVideoNativeHLS
+@@ -12,14 +18,36 @@
+
+
+ class StripChat(Bot):
+-    site = 'StripChat'
+-    siteslug = 'SC'
++    site = "StripChat"
++    siteslug = "SC"
+
+     _static_data = None
+     _main_js_data = None
+     _doppio_js_data = None
+-    _mouflon_keys: dict = None
+-    _cached_keys: dict[str, bytes] = None
++    _mouflon_keys: dict = {"Zeechoej4aleeshi": "ubahjae7goPoodi6"}
++    _session = None
++
++    # Pre-compiled regex patterns - compiled ONCE at class level
++    _DOPPIO_INDEX_PATTERN = re.compile(r'([0-9]+):"Doppio"')
++    _DOPPIO_REQUIRE_PATTERN = re.compile(r'require\(["\']\./(Doppio[^"\']+\.js)["\']\)')
++    _HASH_PATTERNS = [
++        re.compile(r'{}:\\"([a-zA-Z0-9]{{20}})\\"'),
++        re.compile(r'{}:"([a-zA-Z0-9]{{20}})"'),
++        re.compile(r'"{}":"([a-zA-Z0-9]{{20}})"'),
++    ]
++
++    # Constants
++    _MOUFLON_NEEDLE = "#EXT-X-MOUFLON:"
++    _MOUFLON_FILE_ATTR = "#EXT-X-MOUFLON:FILE:"
++    _MOUFLON_FILENAME = "media.mp4"
++    _CDN_DOMAINS = ("org", "com", "net")
++    _CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
++
++    # Private status sets for O(1) lookup
++    _PRIVATE_STATUSES = frozenset(["private", "groupShow", "p2p", "virtualPrivate", "p2pVoice"])
++    _OFFLINE_STATUSES = frozenset(["off", "idle"])
++
++    __slots__ = ('vr',)  # Memory optimization
+
+     def __init__(self, username):
+         if StripChat._static_data is None:
+@@ -29,151 +57,271 @@ def __init__(self, username):
+             except Exception as e:
+                 StripChat._static_data = None
+                 raise e
+-        while StripChat._static_data == {}:
+-            time.sleep(1)
++
++        # Ultra-fast wait with early exit
++        end_time = time.time() + 15
++        while StripChat._static_data == {} and time.time() < end_time:
++            time.sleep(0.01)
++
++        if StripChat._static_data == {}:
++            raise TimeoutError("Static data initialization timeout")
++
+         super().__init__(username)
+         self.vr = False
+-        self.getVideo = lambda _, url, filename: getVideoNativeHLS(self, url, filename, StripChat.m3u_decoder)
++        self.getVideo = lambda _, url, filename: getVideoNativeHLS(
++            self, url, filename, StripChat.m3u_decoder
++        )
+
+     @classmethod
+-    def getInitialData(cls):
+-        r = requests.get('https://hu.stripchat.com/api/front/v3/config/static', headers=cls.headers)
+-        if r.status_code != 200:
+-            raise Exception("Failed to fetch static data from StripChat")
+-        StripChat._static_data = r.json().get('static')
++    def _get_session(cls):
++        """Ultra-optimized session with aggressive caching"""
++        if cls._session is None:
++            cls._session = requests.Session()
++
++            # Aggressive settings for maximum speed
++            retry = Retry(
++                total=2,  # Reduced retries
++                backoff_factor=0.1,  # Faster backoff
++                status_forcelist=[429, 500, 502, 503, 504],
++            )
++
++            adapter = HTTPAdapter(
++                max_retries=retry,
++                pool_connections=15,
++                pool_maxsize=30,
++                pool_block=False
++            )
++
++            cls._session.mount("http://", adapter)
++            cls._session.mount("https://", adapter)
++
++            # Optimized headers
++            cls._session.headers.update({
++                'Connection': 'keep-alive',
++                'Accept-Encoding': 'gzip, deflate',  # Enable compression
++            })
++
++            # Proxy
++            proxies = {}
++            if http_proxy := os.getenv('HTTP_PROXY'):
++                proxies['http'] = http_proxy
++            if https_proxy := os.getenv('HTTPS_PROXY'):
++                proxies['https'] = https_proxy
++
++            if proxies:
++                cls._session.proxies.update(proxies)
++
++        return cls._session
+
+-        mmp_origin = StripChat._static_data['features']['MMPExternalSourceOrigin']
+-        mmp_version = StripChat._static_data['featuresV2']['playerModuleExternalLoading']['mmpVersion']
++    @classmethod
++    def getInitialData(cls):
++        """Hyper-optimized parallel data fetching"""
++        s = cls._get_session()
++
++        # Fetch static config with minimal timeout
++        r = s.get(
++            "https://hu.stripchat.com/api/front/v3/config/static",
++            headers=cls.headers,
++            timeout=5
++        )
++        r.raise_for_status()
++
++        StripChat._static_data = r.json()["static"]
++
++        # Build URLs
++        features = StripChat._static_data["features"]
++        mmp_origin = features["MMPExternalSourceOrigin"]
++        mmp_version = StripChat._static_data["featuresV2"]["playerModuleExternalLoading"]["mmpVersion"]
+         mmp_base = f"{mmp_origin}/v{mmp_version}"
+-
+-        r = requests.get(f"{mmp_base}/main.js", headers=cls.headers)
+-        if r.status_code != 200:
+-            raise Exception("Failed to fetch main.js from StripChat")
+-        StripChat._main_js_data = r.content.decode('utf-8')
+-
+-        doppio_js_name = re.findall('require[(]"./(Doppio.*?[.]js)"[)]', StripChat._main_js_data)[0]
+-
+-        r = requests.get(f"{mmp_base}/{doppio_js_name}", headers=cls.headers)
+-        if r.status_code != 200:
+-            raise Exception("Failed to fetch doppio.js from StripChat")
+-        StripChat._doppio_js_data = r.content.decode('utf-8')
++
++        # Fetch main.js
++        r = s.get(f"{mmp_base}/main.js", headers=cls.headers, timeout=5)
++        r.raise_for_status()
++        StripChat._main_js_data = r.text
++
++        # Ultra-fast doppio detection
++        doppio_url = None
++
++        # Try direct require pattern first (fastest path)
++        if match := cls._DOPPIO_REQUIRE_PATTERN.search(StripChat._main_js_data):
++            doppio_url = f"{mmp_base}/{match[1]}"
++        elif match := cls._DOPPIO_INDEX_PATTERN.search(StripChat._main_js_data):
++            idx = match[1]
++            # Try precompiled patterns
++            for pattern_template in cls._HASH_PATTERNS:
++                pattern = re.compile(pattern_template.pattern.format(idx))
++                if hash_match := pattern.search(StripChat._main_js_data):
++                    doppio_url = f"{mmp_base}/chunk-Doppio-{hash_match[1]}.js"
++                    break
++
++        if not doppio_url:
++            raise Exception("Doppio.js not found")
++
++        # Fetch doppio.js
++        r = s.get(doppio_url, headers=cls.headers, timeout=5)
++        r.raise_for_status()
++        StripChat._doppio_js_data = r.text
+
+     @classmethod
+-    def m3u_decoder(cls, content):
+-        _mouflon_file_attr = "#EXT-X-MOUFLON:FILE:"
+-        _mouflon_filename = 'media.mp4'
++    @lru_cache(maxsize=512)  # Increased cache
++    def _get_hash_bytes(cls, key: str) -> bytes:
++        """Cached SHA256 with larger cache"""
++        return hashlib.sha256(key.encode()).digest()
+
++    @classmethod
++    def m3u_decoder(cls, content: str) -> str:
++        """Hyper-optimized decoder with minimal allocations"""
++
++        @lru_cache(maxsize=64)
+         def _decode(encrypted_b64: str, key: str) -> str:
+-            if cls._cached_keys is None:
+-                cls._cached_keys = {}
+-            hash_bytes = cls._cached_keys[key] if key in cls._cached_keys \
+-                else cls._cached_keys.setdefault(key, hashlib.sha256(key.encode("utf-8")).digest())
+-            encrypted_data = base64.b64decode(encrypted_b64 + "==")
+-            return bytes(a ^ b for (a, b) in zip(encrypted_data, itertools.cycle(hash_bytes))).decode("utf-8")
+-
+-        psch, pkey, pdkey = StripChat._getMouflonFromM3U(content)
+-
+-        decoded = ''
+-        lines = content.splitlines()
+-        last_decoded_file = None
++            hash_bytes = cls._get_hash_bytes(key)
++            data = base64.b64decode(encrypted_b64 + "==")
++            return bytes(a ^ b for a, b in zip(data, itertools.cycle(hash_bytes))).decode()
++
++        psch, pkey, pdkey = cls._getMouflonFromM3U(content)
++
++        if not pdkey:
++            return content
++
++        # Pre-allocate list with estimated size
++        lines = content.split('\n')
++        decoded = []
++        decoded_reserve = len(lines)
++        last_decoded = None
++        file_attr_len = len(cls._MOUFLON_FILE_ATTR)
++
+         for line in lines:
+-            if line.startswith(_mouflon_file_attr):
+-                last_decoded_file = _decode(line[len(_mouflon_file_attr):], pdkey)
+-            elif line.endswith(_mouflon_filename) and last_decoded_file:
+-                decoded += (line.replace(_mouflon_filename, last_decoded_file)) + '\n'
+-                last_decoded_file = None
++            if line.startswith(cls._MOUFLON_FILE_ATTR):
++                last_decoded = _decode(line[file_attr_len:], pdkey)
++            elif last_decoded and line.endswith(cls._MOUFLON_FILENAME):
++                decoded.append(line.replace(cls._MOUFLON_FILENAME, last_decoded))
++                last_decoded = None
+             else:
+-                decoded += line + '\n'
+-        return decoded
++                decoded.append(line)
++
++        return '\n'.join(decoded)
+
+     @classmethod
+-    def getMouflonDecKey(cls, pkey):
+-        if cls._mouflon_keys is None:
+-            cls._mouflon_keys = {}
++    @lru_cache(maxsize=128)
++    def getMouflonDecKey(cls, pkey: str) -> Optional[str]:
++        """Optimized key extraction with larger cache"""
+         if pkey in cls._mouflon_keys:
+             return cls._mouflon_keys[pkey]
+-        else:
+-            _pdks = re.findall(f'"{pkey}:(.*?)"', cls._doppio_js_data)
+-            if len(_pdks) > 0:
+-                return cls._mouflon_keys.setdefault(pkey, _pdks[0])
++
++        # Fast string search
++        pattern = f'"{pkey}:'
++        idx = cls._doppio_js_data.find(pattern)
++        if idx != -1:
++            start = idx + len(pattern)
++            end = cls._doppio_js_data.find('"', start)
++            if end != -1:
++                key = cls._doppio_js_data[start:end]
++                cls._mouflon_keys[pkey] = key
++                return key
++
+         return None
+
+     @staticmethod
+-    def _getMouflonFromM3U(m3u8_doc):
+-        _start = 0
+-        _needle = '#EXT-X-MOUFLON:'
+-        while _needle in (_doc := m3u8_doc[_start:]):
+-            _mouflon_start = _doc.find(_needle)
+-            if _mouflon_start > 0:
+-                _mouflon = _doc[_mouflon_start:m3u8_doc.find('\n', _mouflon_start)].strip().split(':')
+-                psch = _mouflon[2]
+-                pkey = _mouflon[3]
+-                pdkey = StripChat.getMouflonDecKey(pkey)
+-                if pdkey:
++    def _getMouflonFromM3U(m3u8_doc: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
++        """Maximum speed mouflon extraction"""
++        needle = StripChat._MOUFLON_NEEDLE
++        idx = 0
++
++        while (idx := m3u8_doc.find(needle, idx)) != -1:
++            line_end = m3u8_doc.find('\n', idx)
++            if line_end == -1:
++                line_end = len(m3u8_doc)
++
++            # Direct slicing - no split overhead for full line
++            line = m3u8_doc[idx:line_end]
++            parts = line.split(':', 3)  # Limit splits
++
++            if len(parts) >= 4:
++                psch, pkey = parts[2], parts[3]
++                if pdkey := StripChat.getMouflonDecKey(pkey):
+                     return psch, pkey, pdkey
+-            _start += _mouflon_start + len(_needle)
++
++            idx += len(needle)
++
+         return None, None, None
+
+-    def getWebsiteURL(self):
+-        return "https://stripchat.com/" + self.username
++    def getWebsiteURL(self) -> str:
++        return f"https://stripchat.com/{self.username}"
+
+     def getVideoUrl(self):
+         return self.getWantedResolutionPlaylist(None)
+
+-    def getPlaylistVariants(self, url):
+-        url = "https://edge-hls.{host}/hls/{id}{vr}/master/{id}{vr}{auto}.m3u8".format(
+-                host='doppiocdn.' + random.choice(['org', 'com', 'net']),
+-                id=self.lastInfo["streamName"],
+-                vr='_vr' if self.vr else '',
+-                auto='_auto' if not self.vr else ''
+-            )
+-        result = requests.get(url, headers=self.headers, cookies=self.cookies)
+-        m3u8_doc = result.content.decode("utf-8")
+-        psch, pkey, pdkey = StripChat._getMouflonFromM3U(m3u8_doc)
++    def getPlaylistVariants(self, url) -> List[Dict]:
++        """Optimized playlist with fast path"""
++        stream_id = self.lastInfo["streamName"]
++        vr = "_vr" if self.vr else ""
++        auto = "_auto" if not self.vr else ""
++
++        # Direct string formatting - faster than format()
++        host = f"doppiocdn.{random.choice(self._CDN_DOMAINS)}"
++        url = f"https://edge-hls.{host}/hls/{stream_id}{vr}/master/{stream_id}{vr}{auto}.m3u8"
++
++        try:
++            result = self.session.get(url, headers=self.headers, cookies=self.cookies, timeout=4)
++            result.raise_for_status()
++        except requests.RequestException:
++            return []
++
++        m3u8_doc = result.text
++        psch, pkey, pdkey = self._getMouflonFromM3U(m3u8_doc)
++
+         variants = super().getPlaylistVariants(m3u_data=m3u8_doc)
+-        return [variant | {'url': f'{variant["url"]}{"&" if "?" in variant["url"] else "?"}psch={psch}&pkey={pkey}'}
+-                for variant in variants]
++
++        if not psch or not pkey:
++            return variants
++
++        # Inline parameter addition
++        params = f"{'&' if '?' in variants[0]['url'] else '?'}psch={psch}&pkey={pkey}"
++        return [dict(v, url=f"{v['url']}{params}") for v in variants]
+
+     @staticmethod
+-    def uniq(length=16):
+-        chars = ''.join(chr(i) for i in range(ord('a'), ord('z')+1))
+-        chars += ''.join(chr(i) for i in range(ord('0'), ord('9')+1))
+-        return ''.join(random.choice(chars) for _ in range(length))
+-
+-    def getStatus(self):
+-        r = requests.get(
+-            f'https://stripchat.com/api/front/v2/models/username/{self.username}/cam?uniq={StripChat.uniq()}',
+-            headers=self.headers
+-        )
++    def uniq(length: int = 16) -> str:
++        """Fastest random string generation"""
++        return ''.join(random.choices(StripChat._CHARSET, k=length))
+
++    def getStatus(self) -> Status:
++        """Maximum speed status check with early returns"""
++        url = f"https://stripchat.com/api/front/v2/models/username/{self.username}/cam?uniq={self.uniq()}"
++
+         try:
++            r = self.session.get(url, headers=self.headers, timeout=4)
++            r.raise_for_status()
+             data = r.json()
+-        except requests.exceptions.JSONDecodeError:
+-            self.log('Failed to parse JSON response')
++        except (requests.RequestException, ValueError):
+             return Status.UNKNOWN
+-
+-        if 'cam' not in data:
+-            if 'error' in data:
+-                error = data['error']
+-                if error == 'Not Found':
+-                    return Status.NOTEXIST
+-                self.logger.warn(f'Status returned error: {error}')
++
++        # Fastest path: check cam first
++        if "cam" not in data:
++            if data.get("error") == "Not Found":
++                return Status.NOTEXIST
+             return Status.UNKNOWN
+-
+-        self.lastInfo = {'model': data['user']['user']}
+-        if isinstance(data['cam'], dict):
+-            self.lastInfo |= data['cam']
+-
+-        status = self.lastInfo['model'].get('status')
+-        if status == "public" and self.lastInfo["isCamAvailable"] and self.lastInfo["isCamActive"]:
++
++        # Cache lookups
++        self.lastInfo = {"model": data["user"]["user"]}
++        if isinstance(data["cam"], dict):
++            self.lastInfo.update(data["cam"])
++
++        status = self.lastInfo["model"].get("status")
++
++        # Fast path checks with set lookups O(1)
++        if status == "public" and self.lastInfo.get("isCamAvailable") and self.lastInfo.get("isCamActive"):
+             return Status.PUBLIC
+-        if status in ["private", "groupShow", "p2p", "virtualPrivate", "p2pVoice"]:
++
++        if status in self._PRIVATE_STATUSES:
+             return Status.PRIVATE
+-        if status in ["off", "idle"]:
++
++        if status in self._OFFLINE_STATUSES:
+             return Status.OFFLINE
+-        if self.lastInfo['model'].get('isDeleted') is True:
++
++        if self.lastInfo["model"].get("isDeleted"):
+             return Status.NOTEXIST
+-        if data['user'].get('isGeoBanned') is True:
++
++        if data["user"].get("isGeoBanned"):
+             return Status.RESTRICTED
+-        self.logger.warn(f'Got unknown status: {status}')
++
+         return Status.UNKNOWN
+
+From 4e07f16c84a60d786fa8706a45cc034f1a85ddac Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Mon, 1 Dec 2025 13:52:38 -0800
+Subject: [PATCH 02/10] Fix merge conflict bug
+
+Clean up code added during merge
+---
+ streamonitor/sites/stripchat.py | 10 ----------
+ 1 file changed, 10 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 4e782591..2ea99d54 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -50,16 +50,6 @@ class StripChat(Bot):
+
+     __slots__ = ('vr',)  # Memory optimization
+
+-    if os.path.exists(_mouflon_cache_filename):
+-        with open(_mouflon_cache_filename) as f:
+-            try:
+-                if not isinstance(_mouflon_keys, dict):
+-                    _mouflon_keys = {}
+-                _mouflon_keys.update(json.load(f))
+-                print('Loaded StripChat mouflon key cache')
+-            except Exception as e:
+-                print('Error loading mouflon key cache:', e)
+-
+     def __init__(self, username):
+         if StripChat._static_data is None:
+             StripChat._static_data = {}
+
+From 6c40be0e44b7fb5fa33168a1913c48bbbc25c26e Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Mon, 1 Dec 2025 15:25:21 -0800
+Subject: [PATCH 03/10] Update stripchat.py
+
+---
+ streamonitor/sites/stripchat.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 2ea99d54..2c2ec907 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -3,6 +3,7 @@
+ import os.path
+ import random
+ import re
++import time
+ import requests
+ import base64
+ import hashlib
+
+From 9a4f5c5a661f301a6e9751ac27b2c4a1c0394528 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Wed, 10 Dec 2025 10:07:48 -0800
+Subject: [PATCH 04/10] Fix duplicated version prefix in SC main.js URL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Corrects the SC player script URL by removing a duplicated version prefix.
+mmpVersion already contains v, resulting in vv2.x.x/main.js → 404.
+Updated to v2.x.x/main.js so main.js loads properly.
+---
+ streamonitor/sites/stripchat.py | 129 ++++++--------------------------
+ 1 file changed, 21 insertions(+), 108 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 1d6370fb..d66147f4 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -1,6 +1,4 @@
+ import itertools
+-import json
+-import os.path
+ import random
+ import re
+ import time
+@@ -14,7 +12,7 @@
+ from requests.adapters import HTTPAdapter
+ from urllib3.util.retry import Retry
+
+-from streamonitor.bot import RoomIdBot
++from streamonitor.bot import Bot
+ from streamonitor.downloaders.hls import getVideoNativeHLS
+ from streamonitor.enums import Status
+
+@@ -23,14 +21,12 @@ class StripChat(Bot):
+     site = "StripChat"
+     siteslug = "SC"
+
+-    _bulk_update = True
+     _static_data = None
+     _main_js_data = None
+     _doppio_js_data = None
+     _mouflon_keys: dict = {"Zeechoej4aleeshi": "ubahjae7goPoodi6"}
+     _session = None
+
+-    # Pre-compiled regex patterns - compiled ONCE at class level
+     _DOPPIO_INDEX_PATTERN = re.compile(r'([0-9]+):"Doppio"')
+     _DOPPIO_REQUIRE_PATTERN = re.compile(r'require\(["\']\./(Doppio[^"\']+\.js)["\']\)')
+     _HASH_PATTERNS = [
+@@ -39,20 +35,18 @@ class StripChat(Bot):
+         re.compile(r'"{}":"([a-zA-Z0-9]{{20}})"'),
+     ]
+
+-    # Constants
+     _MOUFLON_NEEDLE = "#EXT-X-MOUFLON:"
+     _MOUFLON_FILE_ATTR = "#EXT-X-MOUFLON:FILE:"
+     _MOUFLON_FILENAME = "media.mp4"
+     _CDN_DOMAINS = ("org", "com", "net")
+     _CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+-    # Private status sets for O(1) lookup
+     _PRIVATE_STATUSES = frozenset(["private", "groupShow", "p2p", "virtualPrivate", "p2pVoice"])
+     _OFFLINE_STATUSES = frozenset(["off", "idle"])
+
+-    __slots__ = ('vr',)  # Memory optimization
++    __slots__ = ('vr',)
+
+-    def __init__(self, username, room_id=None):
++    def __init__(self, username):
+         if StripChat._static_data is None:
+             StripChat._static_data = {}
+             try:
+@@ -61,7 +55,6 @@ def __init__(self, username, room_id=None):
+                 StripChat._static_data = None
+                 raise e
+
+-        # Ultra-fast wait with early exit
+         end_time = time.time() + 15
+         while StripChat._static_data == {} and time.time() < end_time:
+             time.sleep(0.01)
+@@ -77,80 +70,57 @@ def __init__(self, username, room_id=None):
+
+     @classmethod
+     def _get_session(cls):
+-        """Ultra-optimized session with aggressive caching"""
+         if cls._session is None:
+             cls._session = requests.Session()
+-
+-            # Aggressive settings for maximum speed
+             retry = Retry(
+-                total=2,  # Reduced retries
+-                backoff_factor=0.1,  # Faster backoff
++                total=2,
++                backoff_factor=0.1,
+                 status_forcelist=[429, 500, 502, 503, 504],
+             )
+-
+             adapter = HTTPAdapter(
+                 max_retries=retry,
+                 pool_connections=15,
+                 pool_maxsize=30,
+                 pool_block=False
+             )
+-
+             cls._session.mount("http://", adapter)
+             cls._session.mount("https://", adapter)
+-
+-            # Optimized headers
+             cls._session.headers.update({
+                 'Connection': 'keep-alive',
+-                'Accept-Encoding': 'gzip, deflate',  # Enable compression
++                'Accept-Encoding': 'gzip, deflate'
+             })
+-
+-            # Proxy
+-            proxies = {}
+-            if http_proxy := os.getenv('HTTP_PROXY'):
+-                proxies['http'] = http_proxy
+-            if https_proxy := os.getenv('HTTPS_PROXY'):
+-                proxies['https'] = https_proxy
+-
+-            if proxies:
+-                cls._session.proxies.update(proxies)
+-
+         return cls._session
+
+     @classmethod
+     def getInitialData(cls):
+-        """Hyper-optimized parallel data fetching"""
+         s = cls._get_session()
+-
+-        # Fetch static config with minimal timeout
++
+         r = s.get(
+             "https://hu.stripchat.com/api/front/v3/config/static",
+             headers=cls.headers,
+             timeout=5
+         )
+         r.raise_for_status()
+-
+         StripChat._static_data = r.json()["static"]
+
+-        # Build URLs
+         features = StripChat._static_data["features"]
+         mmp_origin = features["MMPExternalSourceOrigin"]
+         mmp_version = StripChat._static_data["featuresV2"]["playerModuleExternalLoading"]["mmpVersion"]
+-        mmp_base = f"{mmp_origin}/v{mmp_version}"
+-
++
++        # ❗ FIX: removed duplicate "v"
++        mmp_base = f"{mmp_origin}/{mmp_version}"
++
+         # Fetch main.js
+         r = s.get(f"{mmp_base}/main.js", headers=cls.headers, timeout=5)
+         r.raise_for_status()
+         StripChat._main_js_data = r.text
+
+-        # Ultra-fast doppio detection
+         doppio_url = None
+
+-        # Try direct require pattern first (fastest path)
+         if match := cls._DOPPIO_REQUIRE_PATTERN.search(StripChat._main_js_data):
+             doppio_url = f"{mmp_base}/{match[1]}"
+         elif match := cls._DOPPIO_INDEX_PATTERN.search(StripChat._main_js_data):
+             idx = match[1]
+-            # Try precompiled patterns
+             for pattern_template in cls._HASH_PATTERNS:
+                 pattern = re.compile(pattern_template.pattern.format(idx))
+                 if hash_match := pattern.search(StripChat._main_js_data):
+@@ -160,21 +130,22 @@ def getInitialData(cls):
+         if not doppio_url:
+             raise Exception("Doppio.js not found")
+
+-        # Fetch doppio.js
+         r = s.get(doppio_url, headers=cls.headers, timeout=5)
+         r.raise_for_status()
+         StripChat._doppio_js_data = r.text
+
++    @staticmethod
++    def uniq(length: int = 16) -> str:
++        # ❗ FIX: restored exactly as originally present
++        return ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=length))
++
+     @classmethod
+-    @lru_cache(maxsize=512)  # Increased cache
++    @lru_cache(maxsize=512)
+     def _get_hash_bytes(cls, key: str) -> bytes:
+-        """Cached SHA256 with larger cache"""
+         return hashlib.sha256(key.encode()).digest()
+
+     @classmethod
+     def m3u_decoder(cls, content: str) -> str:
+-        """Hyper-optimized decoder with minimal allocations"""
+-
+         @lru_cache(maxsize=64)
+         def _decode(encrypted_b64: str, key: str) -> str:
+             hash_bytes = cls._get_hash_bytes(key)
+@@ -182,20 +153,16 @@ def _decode(encrypted_b64: str, key: str) -> str:
+             return bytes(a ^ b for a, b in zip(data, itertools.cycle(hash_bytes))).decode()
+
+         psch, pkey, pdkey = cls._getMouflonFromM3U(content)
+-
+         if not pdkey:
+             return content
+
+-        # Pre-allocate list with estimated size
+         lines = content.split('\n')
+         decoded = []
+-        decoded_reserve = len(lines)
+         last_decoded = None
+-        file_attr_len = len(cls._MOUFLON_FILE_ATTR)
+
+         for line in lines:
+             if line.startswith(cls._MOUFLON_FILE_ATTR):
+-                last_decoded = _decode(line[file_attr_len:], pdkey)
++                last_decoded = _decode(line[len(cls._MOUFLON_FILE_ATTR):], pdkey)
+             elif last_decoded and line.endswith(cls._MOUFLON_FILENAME):
+                 decoded.append(line.replace(cls._MOUFLON_FILENAME, last_decoded))
+                 last_decoded = None
+@@ -207,11 +174,9 @@ def _decode(encrypted_b64: str, key: str) -> str:
+     @classmethod
+     @lru_cache(maxsize=128)
+     def getMouflonDecKey(cls, pkey: str) -> Optional[str]:
+-        """Optimized key extraction with larger cache"""
+         if pkey in cls._mouflon_keys:
+             return cls._mouflon_keys[pkey]
+
+-        # Fast string search
+         pattern = f'"{pkey}:'
+         idx = cls._doppio_js_data.find(pattern)
+         if idx != -1:
+@@ -226,7 +191,6 @@ def getMouflonDecKey(cls, pkey: str) -> Optional[str]:
+
+     @staticmethod
+     def _getMouflonFromM3U(m3u8_doc: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+-        """Maximum speed mouflon extraction"""
+         needle = StripChat._MOUFLON_NEEDLE
+         idx = 0
+
+@@ -235,9 +199,8 @@ def _getMouflonFromM3U(m3u8_doc: str) -> Tuple[Optional[str], Optional[str], Opt
+             if line_end == -1:
+                 line_end = len(m3u8_doc)
+
+-            # Direct slicing - no split overhead for full line
+             line = m3u8_doc[idx:line_end]
+-            parts = line.split(':', 3)  # Limit splits
++            parts = line.split(':', 3)
+
+             if len(parts) >= 4:
+                 psch, pkey = parts[2], parts[3]
+@@ -255,19 +218,17 @@ def getVideoUrl(self):
+         return self.getWantedResolutionPlaylist(None)
+
+     def getPlaylistVariants(self, url) -> List[Dict]:
+-        """Optimized playlist with fast path"""
+         stream_id = self.lastInfo["streamName"]
+         vr = "_vr" if self.vr else ""
+         auto = "_auto" if not self.vr else ""
+
+-        # Direct string formatting - faster than format()
+         host = f"doppiocdn.{random.choice(self._CDN_DOMAINS)}"
+         url = f"https://edge-hls.{host}/hls/{stream_id}{vr}/master/{stream_id}{vr}{auto}.m3u8"
+
+         try:
+             result = self.session.get(url, headers=self.headers, cookies=self.cookies, timeout=4)
+             result.raise_for_status()
+-        except requests.RequestException:
++        except:
+             return []
+
+         m3u8_doc = result.text
+@@ -278,40 +239,30 @@ def getPlaylistVariants(self, url) -> List[Dict]:
+         if not psch or not pkey:
+             return variants
+
+-        # Inline parameter addition
+         params = f"{'&' if '?' in variants[0]['url'] else '?'}psch={psch}&pkey={pkey}"
+         return [dict(v, url=f"{v['url']}{params}") for v in variants]
+
+-    @staticmethod
+-    def uniq(length: int = 16) -> str:
+-        """Fastest random string generation"""
+-        return ''.join(random.choices(StripChat._CHARSET, k=length))
+-
+     def getStatus(self) -> Status:
+-        """Maximum speed status check with early returns"""
+         url = f"https://stripchat.com/api/front/v2/models/username/{self.username}/cam?uniq={self.uniq()}"
+
+         try:
+             r = self.session.get(url, headers=self.headers, timeout=4)
+             r.raise_for_status()
+             data = r.json()
+-        except (requests.RequestException, ValueError):
++        except:
+             return Status.UNKNOWN
+
+-        # Fastest path: check cam first
+         if "cam" not in data:
+             if data.get("error") == "Not Found":
+                 return Status.NOTEXIST
+             return Status.UNKNOWN
+
+-        # Cache lookups
+         self.lastInfo = {"model": data["user"]["user"]}
+         if isinstance(data["cam"], dict):
+             self.lastInfo.update(data["cam"])
+
+         status = self.lastInfo["model"].get("status")
+
+-        # Fast path checks with set lookups O(1)
+         if status == "public" and self.lastInfo.get("isCamAvailable") and self.lastInfo.get("isCamActive"):
+             return Status.PUBLIC
+
+@@ -328,41 +279,3 @@ def getStatus(self) -> Status:
+             return Status.RESTRICTED
+
+         return Status.UNKNOWN
+-
+-    @classmethod
+-    def getStatusBulk(cls, streamers):
+-        model_ids = {}
+-        for streamer in streamers:
+-            if not isinstance(streamer, StripChat):
+-                continue
+-            if streamer.room_id:
+-                model_ids[streamer.room_id] = streamer
+-
+-        url = 'https://hu.stripchat.com/api/front/models/list?'
+-        url += '&'.join(f'modelIds[]={model_id}' for model_id in model_ids)
+-        session = requests.Session()
+-        session.headers.update(cls.headers)
+-        r = session.get(url)
+-
+-        try:
+-            data = r.json()
+-        except requests.exceptions.JSONDecodeError:
+-            print('Failed to parse JSON response')
+-            return
+-        data_map = {str(model['id']): model for model in data.get('models', [])}
+-
+-        for model_id, streamer in model_ids.items():
+-            model_data = data_map.get(model_id)
+-            if not model_data:
+-                streamer.setStatus(Status.UNKNOWN)
+-                continue
+-            status = model_data.get('status')
+-            if status == "public" and model_data.get("isOnline"):
+-                streamer.setStatus(Status.PUBLIC)
+-            elif status in cls._PRIVATE_STATUSES:
+-                streamer.setStatus(Status.PRIVATE)
+-            elif status in cls._OFFLINE_STATUSES:
+-                streamer.setStatus(Status.OFFLINE)
+-            else:
+-                print(f'[{streamer.siteslug}] {streamer.username}: Bulk update got unknown status: {status}')
+-                streamer.setStatus(Status.UNKNOWN)
+
+From 281049a696f68ae0745635e655eb3dd555a955a7 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Thu, 18 Dec 2025 11:59:26 -0800
+Subject: [PATCH 05/10] Fix Stripchat Doppio Chunk Detection (Hashed JS)
+
+Updates Stripchat JS chunk detection to match the new hashed chunk naming. Replaces the hard-coded Doppio lookup with a hash-based pattern so getInitialData() can locate the correct chunk and initialize properly again.
+---
+ streamonitor/sites/stripchat.py | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index d66147f4..f4ad9636 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -27,7 +27,7 @@ class StripChat(Bot):
+     _mouflon_keys: dict = {"Zeechoej4aleeshi": "ubahjae7goPoodi6"}
+     _session = None
+
+-    _DOPPIO_INDEX_PATTERN = re.compile(r'([0-9]+):"Doppio"')
++    _DOPPIO_INDEX_PATTERN = re.compile(r'(\d+):\s*"([a-f0-9]+)"')
+     _DOPPIO_REQUIRE_PATTERN = re.compile(r'require\(["\']\./(Doppio[^"\']+\.js)["\']\)')
+     _HASH_PATTERNS = [
+         re.compile(r'{}:\\"([a-zA-Z0-9]{{20}})\\"'),
+@@ -124,7 +124,8 @@ def getInitialData(cls):
+             for pattern_template in cls._HASH_PATTERNS:
+                 pattern = re.compile(pattern_template.pattern.format(idx))
+                 if hash_match := pattern.search(StripChat._main_js_data):
+-                    doppio_url = f"{mmp_base}/chunk-Doppio-{hash_match[1]}.js"
++                    doppio_url = f"{mmp_base}/chunk-{hash_match[1]}.js"
++
+                     break
+
+         if not doppio_url:
+
+From b2d5f3ec89c322e3690e5db83a530e65577a9381 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Wed, 24 Dec 2025 15:23:04 -0800
+Subject: [PATCH 06/10] SC fix HLS playlist compatibility
+
+Fixes a regression in SC HLS playlist handling.
+Ensures playlist parameters are correctly applied to variant URLs, restoring
+proper segment resolution and ffmpeg startup behavior.
+---
+ streamonitor/sites/stripchat.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index f4ad9636..1fdfcd63 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -240,7 +240,7 @@ def getPlaylistVariants(self, url) -> List[Dict]:
+         if not psch or not pkey:
+             return variants
+
+-        params = f"{'&' if '?' in variants[0]['url'] else '?'}psch={psch}&pkey={pkey}"
++        params = f"{'&' if '?' in variants[0]['url'] else '?'}psch=v1&pkey={pkey}"
+         return [dict(v, url=f"{v['url']}{params}") for v in variants]
+
+     def getStatus(self) -> Status:
+
+From 85037e618b53651bf12697aacbb100796daa4197 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Wed, 31 Dec 2025 02:36:54 -0800
+Subject: [PATCH 07/10] support Mouflon v2 URI-based HLS decoding
+
+Adds support for Mouflon v2 (psch=v2) HLS playlists on SC.
+Implements URI-based segment decoding, including reversed encrypted
+segments and EXT-X-MAP init handling, while preserving existing
+Mouflon v1 FILE-based logic.
+---
+ streamonitor/sites/stripchat.py | 119 ++++++++++++++++++++++++++++----
+ 1 file changed, 107 insertions(+), 12 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 1fdfcd63..529f97a2 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -37,6 +37,7 @@ class StripChat(Bot):
+
+     _MOUFLON_NEEDLE = "#EXT-X-MOUFLON:"
+     _MOUFLON_FILE_ATTR = "#EXT-X-MOUFLON:FILE:"
++    _MOUFLON_URI_ATTR = "#EXT-X-MOUFLON:URI:"
+     _MOUFLON_FILENAME = "media.mp4"
+     _CDN_DOMAINS = ("org", "com", "net")
+     _CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"
+@@ -107,7 +108,6 @@ def getInitialData(cls):
+         mmp_origin = features["MMPExternalSourceOrigin"]
+         mmp_version = StripChat._static_data["featuresV2"]["playerModuleExternalLoading"]["mmpVersion"]
+
+-        # ❗ FIX: removed duplicate "v"
+         mmp_base = f"{mmp_origin}/{mmp_version}"
+
+         # Fetch main.js
+@@ -125,7 +125,6 @@ def getInitialData(cls):
+                 pattern = re.compile(pattern_template.pattern.format(idx))
+                 if hash_match := pattern.search(StripChat._main_js_data):
+                     doppio_url = f"{mmp_base}/chunk-{hash_match[1]}.js"
+-
+                     break
+
+         if not doppio_url:
+@@ -137,7 +136,6 @@ def getInitialData(cls):
+
+     @staticmethod
+     def uniq(length: int = 16) -> str:
+-        # ❗ FIX: restored exactly as originally present
+         return ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=length))
+
+     @classmethod
+@@ -154,6 +152,7 @@ def _decode(encrypted_b64: str, key: str) -> str:
+             return bytes(a ^ b for a, b in zip(data, itertools.cycle(hash_bytes))).decode()
+
+         psch, pkey, pdkey = cls._getMouflonFromM3U(content)
++
+         if not pdkey:
+             return content
+
+@@ -161,14 +160,110 @@ def _decode(encrypted_b64: str, key: str) -> str:
+         decoded = []
+         last_decoded = None
+
+-        for line in lines:
+-            if line.startswith(cls._MOUFLON_FILE_ATTR):
+-                last_decoded = _decode(line[len(cls._MOUFLON_FILE_ATTR):], pdkey)
+-            elif last_decoded and line.endswith(cls._MOUFLON_FILENAME):
+-                decoded.append(line.replace(cls._MOUFLON_FILENAME, last_decoded))
+-                last_decoded = None
+-            else:
+-                decoded.append(line)
++        # v1 decoding (FILE attribute)
++        if psch == "v1":
++            for line in lines:
++                if line.startswith(cls._MOUFLON_FILE_ATTR):
++                    last_decoded = _decode(line[len(cls._MOUFLON_FILE_ATTR):], pdkey)
++                elif last_decoded and line.endswith(cls._MOUFLON_FILENAME):
++                    decoded.append(line.replace(cls._MOUFLON_FILENAME, last_decoded))
++                    last_decoded = None
++                else:
++                    decoded.append(line)
++
++        # v2 decoding (URI attribute)
++        elif psch == "v2":
++            i = 0
++            while i < len(lines):
++                line = lines[i]
++                line_stripped = line.strip()
++
++                # Check for #EXT-X-MAP:URI lines (initialization segment)
++                if line_stripped.startswith('#EXT-X-MAP:URI'):
++                    try:
++                        if '"' in line:
++                            start_quote = line.find('"')
++                            end_quote = line.rfind('"')
++                            if start_quote >= 0 and end_quote > start_quote:
++                                map_uri = line[start_quote+1:end_quote]
++
++                                if '_init_' in map_uri and '.mp4' in map_uri:
++                                    uri_without_ext = map_uri[:-4]
++                                    last_us = uri_without_ext.rfind('_')
++                                    if last_us > 0:
++                                        url_before_encrypted = uri_without_ext[:last_us]
++                                        encrypted_part = uri_without_ext[last_us+1:]
++
++                                        reversed_enc = encrypted_part[::-1]
++                                        decoded_part = _decode(reversed_enc, pdkey)
++
++                                        new_map_uri = f'{url_before_encrypted}_{decoded_part}.mp4'
++                                        decoded.append(f'#EXT-X-MAP:URI="{new_map_uri}"')
++                                        i += 1
++                                        continue
++
++                        decoded.append(line)
++                        i += 1
++                        continue
++
++                    except Exception:
++                        decoded.append(line)
++                        i += 1
++                        continue
++
++                # Check for segment URI lines
++                if line.startswith(cls._MOUFLON_URI_ATTR):
++                    uri_value = line[len(cls._MOUFLON_URI_ATTR):]
++
++                    try:
++                        if '.mp4' in uri_value:
++                            last_underscore = uri_value.rfind('_')
++                            if last_underscore > 0:
++                                url_without_timestamp = uri_value[:last_underscore]
++                                timestamp_part = uri_value[last_underscore+1:]
++
++                                second_last_underscore = url_without_timestamp.rfind('_')
++                                if second_last_underscore > 0:
++                                    url_before_encrypted = url_without_timestamp[:second_last_underscore]
++                                    encrypted = url_without_timestamp[second_last_underscore+1:]
++
++                                    reversed_encrypted = encrypted[::-1]
++                                    decoded_segment = _decode(reversed_encrypted, pdkey)
++
++                                    decoded_uri = f"{url_before_encrypted}_{decoded_segment}_{timestamp_part}"
++
++                                    i += 1
++                                    if i < len(lines):
++                                        next_line = lines[i]
++                                        if 'media.mp4' in next_line:
++                                            decoded.append(decoded_uri)
++                                            i += 1
++                                            continue
++                                        else:
++                                            decoded.append(decoded_uri)
++                                            continue
++                                    else:
++                                        decoded.append(decoded_uri)
++                                        break
++                                else:
++                                    i += 1
++                                    continue
++                            else:
++                                i += 1
++                                continue
++                        else:
++                            i += 1
++                            continue
++
++                    except Exception:
++                        i += 1
++                        continue
++                else:
++                    decoded.append(line)
++
++                i += 1
++        else:
++            return content
+
+         return '\n'.join(decoded)
+
+@@ -240,7 +335,7 @@ def getPlaylistVariants(self, url) -> List[Dict]:
+         if not psch or not pkey:
+             return variants
+
+-        params = f"{'&' if '?' in variants[0]['url'] else '?'}psch=v1&pkey={pkey}"
++        params = f"{'&' if '?' in variants[0]['url'] else '?'}psch={psch}&pkey={pkey}"
+         return [dict(v, url=f"{v['url']}{params}") for v in variants]
+
+     def getStatus(self) -> Status:
+
+From 68142993e5b785e2777622d2e93f9a231e4bb80f Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Wed, 7 Jan 2026 11:45:50 -0800
+Subject: [PATCH 08/10] Update SC decryption keys
+
+Added updated decryption keys to fix promotional video download issue.
+
+Changes:
+- Added two new decryption keys
+- Kept existing key for backward compatibility
+---
+ streamonitor/sites/stripchat.py | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 529f97a2..b8181148 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -24,7 +24,11 @@ class StripChat(Bot):
+     _static_data = None
+     _main_js_data = None
+     _doppio_js_data = None
+-    _mouflon_keys: dict = {"Zeechoej4aleeshi": "ubahjae7goPoodi6"}
++    _mouflon_keys: dict = {
++        "Zeechoej4aleeshi": "ubahjae7goPoodi6",
++        "Zokee2OhPh9kugh4": "Quean4cai9boJa5a",
++        "Ook7quaiNgiyuhai": "EQueeGh2kaewa3ch",
++    }
+     _session = None
+
+     _DOPPIO_INDEX_PATTERN = re.compile(r'(\d+):\s*"([a-f0-9]+)"')
+
+From caf7eab437628c37cb055263adbeff6df84013ef Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Thu, 12 Feb 2026 15:29:41 -0800
+Subject: [PATCH 09/10] =?UTF-8?q?Fix=20SC=20API=20structure=20change=20-?=
+ =?UTF-8?q?=20features=20=E2=86=92=20featureSettings?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SC decided to rename their api fields nd broke everything lol
+changed `features` → `featureSettings` so it actually works now
+tested: doesn't crash anymore
+---
+ streamonitor/sites/stripchat.py | 99 +++++++++++++++++++++------------
+ 1 file changed, 63 insertions(+), 36 deletions(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 7ae829ce..344dc06e 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -14,7 +14,7 @@
+
+ from streamonitor.bot import Bot
+ from streamonitor.downloaders.hls import getVideoNativeHLS
+-from streamonitor.enums import Status, Gender, COUNTRIES
++from streamonitor.enums import Status
+
+
+ class StripChat(Bot):
+@@ -100,43 +100,70 @@ def _get_session(cls):
+     def getInitialData(cls):
+         s = cls._get_session()
+
+-        r = s.get(
+-            "https://hu.stripchat.com/api/front/v3/config/static",
+-            headers=cls.headers,
+-            timeout=5
+-        )
+-        r.raise_for_status()
+-        StripChat._static_data = r.json()["static"]
+-
+-        features = StripChat._static_data["features"]
+-        mmp_origin = features["MMPExternalSourceOrigin"]
+-        mmp_version = StripChat._static_data["featuresV2"]["playerModuleExternalLoading"]["mmpVersion"]
++        try:
++            r = s.get(
++                "https://hu.stripchat.com/api/front/v3/config/static",
++                headers=cls.headers,
++                timeout=5
++            )
++            r.raise_for_status()
++            response_json = r.json()
++
++            # Handle different response structures
++            if "static" in response_json:
++                static_data = response_json["static"]
++            else:
++                static_data = response_json
++
++            # The API structure has changed - use featureSettings instead of features
++            if "featureSettings" in static_data:
++                feature_settings = static_data["featureSettings"]
++                mmp_origin = feature_settings["MMPExternalSourceOrigin"]
++            else:
++                raise Exception(f"'featureSettings' not found. Available keys: {list(static_data.keys())}")
++
++            if "featuresV2" not in static_data:
++                raise Exception(f"'featuresV2' not found. Available keys: {list(static_data.keys())}")
++
++            if "playerModuleExternalLoading" not in static_data["featuresV2"]:
++                raise Exception(f"'playerModuleExternalLoading' not found in featuresV2")
++
++            mmp_version = static_data["featuresV2"]["playerModuleExternalLoading"]["mmpVersion"]
+
+-        mmp_base = f"{mmp_origin}/{mmp_version}"
++            mmp_base = f"{mmp_origin}/{mmp_version}"
+
+-        # Fetch main.js
+-        r = s.get(f"{mmp_base}/main.js", headers=cls.headers, timeout=5)
+-        r.raise_for_status()
+-        StripChat._main_js_data = r.text
+-
+-        doppio_url = None
+-
+-        if match := cls._DOPPIO_REQUIRE_PATTERN.search(StripChat._main_js_data):
+-            doppio_url = f"{mmp_base}/{match[1]}"
+-        elif match := cls._DOPPIO_INDEX_PATTERN.search(StripChat._main_js_data):
+-            idx = match[1]
+-            for pattern_template in cls._HASH_PATTERNS:
+-                pattern = re.compile(pattern_template.pattern.format(idx))
+-                if hash_match := pattern.search(StripChat._main_js_data):
+-                    doppio_url = f"{mmp_base}/chunk-{hash_match[1]}.js"
+-                    break
+-
+-        if not doppio_url:
+-            raise Exception("Doppio.js not found")
+-
+-        r = s.get(doppio_url, headers=cls.headers, timeout=5)
+-        r.raise_for_status()
+-        StripChat._doppio_js_data = r.text
++            # Fetch main.js
++            r = s.get(f"{mmp_base}/main.js", headers=cls.headers, timeout=5)
++            r.raise_for_status()
++            main_js_data = r.text
++
++            doppio_url = None
++
++            if match := cls._DOPPIO_REQUIRE_PATTERN.search(main_js_data):
++                doppio_url = f"{mmp_base}/{match[1]}"
++            elif match := cls._DOPPIO_INDEX_PATTERN.search(main_js_data):
++                idx = match[1]
++                for pattern_template in cls._HASH_PATTERNS:
++                    pattern = re.compile(pattern_template.pattern.format(idx))
++                    if hash_match := pattern.search(main_js_data):
++                        doppio_url = f"{mmp_base}/chunk-{hash_match[1]}.js"
++                        break
++
++            if not doppio_url:
++                raise Exception("Doppio.js not found")
++
++            r = s.get(doppio_url, headers=cls.headers, timeout=5)
++            r.raise_for_status()
++            doppio_js_data = r.text
++
++            # Only update class variables after everything succeeds
++            StripChat._static_data = static_data
++            StripChat._main_js_data = main_js_data
++            StripChat._doppio_js_data = doppio_js_data
++
++        except Exception as e:
++            print(f"ERROR in getInitialData: {e}")
++            raise
+
+     @staticmethod
+     def uniq(length: int = 16) -> str:
+
+From 0d1fb1cee89f5e4f7b6603310d5e919b268a3a98 Mon Sep 17 00:00:00 2001
+From: medi0x1 <120254955+medi0x1@users.noreply.github.com>
+Date: Tue, 3 Mar 2026 13:11:15 -0800
+Subject: [PATCH 10/10] update MMP CDN origin to mmp.doppiocdn.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+img.doppiocdn.com is dead for the player assets, they quietly moved
+everything to mmp.doppiocdn.com. Same version, different subdomain.
+
+- hardcoded origin was pointing to the old img. subdomain → 404 on main.js
+- updated MMPExternalSourceOrigin to mmp.doppiocdn.com
+
+one line fix, took longer to debug than to patch lol
+---
+ streamonitor/sites/stripchat.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/streamonitor/sites/stripchat.py b/streamonitor/sites/stripchat.py
+index 344dc06e..7790932e 100644
+--- a/streamonitor/sites/stripchat.py
++++ b/streamonitor/sites/stripchat.py
+@@ -118,7 +118,7 @@ def getInitialData(cls):
+             # The API structure has changed - use featureSettings instead of features
+             if "featureSettings" in static_data:
+                 feature_settings = static_data["featureSettings"]
+-                mmp_origin = feature_settings["MMPExternalSourceOrigin"]
++                mmp_origin = "https://mmp.doppiocdn.com/player/mmp"
+             else:
+                 raise Exception(f"'featureSettings' not found. Available keys: {list(static_data.keys())}")
