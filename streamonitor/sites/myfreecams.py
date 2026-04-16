@@ -1,6 +1,6 @@
 import urllib.parse
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 from streamonitor.bot import Bot
 from streamonitor.enums import Status
 
@@ -47,7 +47,8 @@ class MyFreeCams(Bot):
         if b'model_id' not in qs:
             return Status.NOTEXIST
 
-        doc = BeautifulSoup(doc, 'html.parser')
+        strainer = SoupStrainer(class_='campreview')
+        doc = BeautifulSoup(doc, 'lxml', parse_only=strainer)
         params = doc.find(class_='campreview')
         if params:
             self.attrs = params.attrs
