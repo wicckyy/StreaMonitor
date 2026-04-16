@@ -16,11 +16,9 @@ _logger = log.Logger("utils")
     
 
 def get_streamer_context(streamer: Bot, sort_by_size: bool, play_video: str, user_agent: str) -> StreamerContext:
-    videos: Dict[str, VideoData] = {}
+    videos: Dict[str, VideoData] = {video.filename: video for video in streamer.video_files}
     has_error = False
     recordings_error_message = None
-    for video in streamer.video_files:
-        videos[video.filename] = video
     if sort_by_size:
         videos = dict(sorted(videos.items(), key=lambda item: item[1].filesize, reverse=True))
     else:
