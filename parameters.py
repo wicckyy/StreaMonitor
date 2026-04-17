@@ -84,6 +84,18 @@ WEB_THEATER_MODE = env.bool("STRMNTR_THEATER_MODE", False)
 # set to any other non-falsy value to always check
 WEB_CONFIRM_DELETES = env.str("STRMNTR_CONFIRM_DEL", "MOBILE")
 
+import secrets
+
 # Password for the web server
 # If empty no auth required, else username admin and choosen password
-WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", "admin")
+# Generates a random secure password by default if one is not provided to prevent unauthorized access
+_default_password = secrets.token_urlsafe(16)
+WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", _default_password)
+
+if WEBSERVER_PASSWORD == _default_password:
+    print(f"\n=======================================================\n"
+          f"WARNING: No STRMNTR_PASSWORD set in environment.\n"
+          f"A random password has been generated for the web interface (user 'admin'):\n"
+          f"{WEBSERVER_PASSWORD}\n"
+          f"Set STRMNTR_PASSWORD to an empty string to disable authentication.\n"
+          f"=======================================================\n")
