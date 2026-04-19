@@ -1,4 +1,5 @@
 import os.path
+import secrets
 import environ
 
 
@@ -86,4 +87,5 @@ WEB_CONFIRM_DELETES = env.str("STRMNTR_CONFIRM_DEL", "MOBILE")
 
 # Password for the web server
 # If empty no auth required, else username admin and choosen password
-WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", "admin")
+_DEFAULT_PASSWORD = secrets.token_urlsafe(16)
+WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", _DEFAULT_PASSWORD)
