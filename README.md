@@ -87,7 +87,7 @@ python3 Controller.py status
 #### Web interface
 
 You can access the web interface on port 5000. 
-If set password in parameters.py username is admin, password admin, empty password is also allowed.
+If no password is set in parameters.py, a secure random one will be generated. You can explicitly set an empty password in parameters.py to disable authentication. The username is admin.
 When you set the WEBSERVER_HOST it is also accesible to from other computers in the network
 
 ## Docker support

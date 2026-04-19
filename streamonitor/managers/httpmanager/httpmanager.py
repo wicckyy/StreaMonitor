@@ -6,7 +6,7 @@ import os
 import json
 import logging
 
-from parameters import WEBSERVER_HOST, WEBSERVER_PORT, WEBSERVER_PASSWORD, WEB_LIST_FREQUENCY, WEB_STATUS_FREQUENCY, \
+from parameters import WEBSERVER_HOST, WEBSERVER_PORT, WEBSERVER_PASSWORD, _DEFAULT_PASSWORD, WEB_LIST_FREQUENCY, WEB_STATUS_FREQUENCY, \
     WEBSERVER_SKIN
 import streamonitor.log as log
 from functools import wraps
@@ -51,6 +51,9 @@ class HTTPManager(Manager):
 
         def check_auth(username, password):
             return WEBSERVER_PASSWORD == "" or (username == 'admin' and compare_digest(password, WEBSERVER_PASSWORD))
+
+        if WEBSERVER_PASSWORD == _DEFAULT_PASSWORD:
+            self.logger.info(f"Web interface starting with auto-generated admin password: {_DEFAULT_PASSWORD}")
 
         def login_required(f):
             @wraps(f)
