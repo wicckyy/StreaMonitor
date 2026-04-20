@@ -7,7 +7,7 @@ import json
 import logging
 
 from parameters import WEBSERVER_HOST, WEBSERVER_PORT, WEBSERVER_PASSWORD, WEB_LIST_FREQUENCY, WEB_STATUS_FREQUENCY, \
-    WEBSERVER_SKIN
+    WEBSERVER_SKIN, _is_generated_password
 import streamonitor.log as log
 from functools import wraps
 from secrets import compare_digest
@@ -48,6 +48,9 @@ class HTTPManager(Manager):
         app.add_template_filter(human_file_size, name='tohumanfilesize')
         app.add_template_filter(status_icon, name='status_icon_class')
         app.add_template_filter(status_text, name='status_text')
+
+        if WEBSERVER_PASSWORD and _is_generated_password:
+            self.logger.info(f"Webserver authentication required. Using auto-generated password: {WEBSERVER_PASSWORD}")
 
         def check_auth(username, password):
             return WEBSERVER_PASSWORD == "" or (username == 'admin' and compare_digest(password, WEBSERVER_PASSWORD))
