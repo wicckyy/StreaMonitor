@@ -1,0 +1,4 @@
+## 2024-05-24 - Hardcoded Default Webserver Password
+**Vulnerability:** The `WEBSERVER_PASSWORD` in `parameters.py` defaulted to `"admin"`. This means if a user starts the application without configuring a password via environment variables, the web interface is secured with a weak, predictable default password.
+**Learning:** Default configurations often prioritize developer convenience over security. When a service requires authentication, failing to provide a custom credential should fail securely (e.g., generate a strong random credential, require the user to set one explicitly, or disable access entirely) instead of falling back to a known value.
+**Prevention:** Always use random, unguessable default values for secrets or fail to start if required secrets are not provided. Use libraries like `secrets` to generate secure default tokens if falling back to a default is necessary.
