@@ -1,0 +1,4 @@
+## 2024-05-24 - Missing Auth on Video Download & Weak Default Creds
+**Vulnerability:** Found an IDOR vulnerability on the `get_video` route (`/video/<user>/<site>/<path:filename>`) which lacked the `@login_required` decorator, allowing unauthenticated access to video files. Also found a weak hardcoded default password ("admin") for the web interface.
+**Learning:** Even if the web interface has authentication, every route serving sensitive data (like files via `send_from_directory`) must individually enforce authorization. Additionally, default credentials in parameters must be securely generated, never hardcoded.
+**Prevention:** Always verify all `@app.route` handlers that return user data or files have the appropriate authentication decorators. Use standard library `secrets` to generate secure default tokens instead of relying on hardcoded defaults.
