@@ -1,0 +1,4 @@
+## 2024-04-24 - [Missing Authentication on Sensitive Endpoints]
+**Vulnerability:** The endpoints `/video/<user>/<site>/<path:filename>` and `/clear` in `streamonitor/managers/httpmanager/httpmanager.py` were missing the `@login_required` decorator.
+**Learning:** In Flask/Waitress apps where authentication is configured via a decorator, developers sometimes forget to apply the decorator to endpoints that serve files directly or return no content (204). This exposes sensitive media files or enables unauthorized actions.
+**Prevention:** Every new or existing endpoint added to `httpmanager.py` should be explicitly audited to determine whether it requires `@login_required`. Endpoints accessing `outputFolder` or providing state-altering functionalities should always be wrapped with authentication.
