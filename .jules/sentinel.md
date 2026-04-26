@@ -1,0 +1,4 @@
+## 2024-04-26 - [Missing Auth Decorator on Sensitive Routes]
+**Vulnerability:** The `/video/<user>/<site>/<path:filename>` and `/clear` endpoints in `streamonitor/managers/httpmanager/httpmanager.py` were missing the `@login_required` decorator, potentially exposing recorded videos and allowing state-altering actions without proper authentication.
+**Learning:** Even when core application functionality requires authentication, all routes exposing sensitive data (like video files) or performing actions must explicitly specify the authorization decorators. It's easy to overlook decorators on utility or simple routes (like `/clear` which just returns a 204).
+**Prevention:** In Flask web applications relying on route-level decorators for security, perform systematic reviews of all `@app.route` handlers to ensure sensitive endpoints are adequately protected.
