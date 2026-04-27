@@ -1,0 +1,4 @@
+## 2024-05-18 - Missing Authentication on Flask Endpoints
+**Vulnerability:** Missing authorization checks (custom @login_required decorator) on the `/video/<user>/<site>/<path:filename>` endpoint and the `/clear` modal action endpoint in Flask.
+**Learning:** In a Flask application using an internal custom `@login_required` decorator for HTTP Basic Auth rather than a global middleware or extension, it is easy to forget applying the decorator to newly added routes, exposing sensitive data (like video recordings) or state-altering actions to unauthenticated users.
+**Prevention:** Consider refactoring the application to use a global before_request handler for authentication to apply a default-deny policy, explicitly whitelisting public routes rather than relying on developers to remember adding decorators to sensitive routes. Alternatively, implement static analysis checks to ensure all Flask routes have the required authentication decorators.
