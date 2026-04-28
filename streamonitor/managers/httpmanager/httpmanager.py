@@ -6,7 +6,7 @@ import os
 import json
 import logging
 
-from parameters import WEBSERVER_HOST, WEBSERVER_PORT, WEBSERVER_PASSWORD, WEB_LIST_FREQUENCY, WEB_STATUS_FREQUENCY, \
+from parameters import WEBSERVER_HOST, WEBSERVER_PORT, WEBSERVER_PASSWORD, WEBSERVER_PASSWORD_IS_AUTO, WEB_LIST_FREQUENCY, WEB_STATUS_FREQUENCY, \
     WEBSERVER_SKIN
 import streamonitor.log as log
 from functools import wraps
@@ -48,6 +48,10 @@ class HTTPManager(Manager):
         app.add_template_filter(human_file_size, name='tohumanfilesize')
         app.add_template_filter(status_icon, name='status_icon_class')
         app.add_template_filter(status_text, name='status_text')
+
+        if WEBSERVER_PASSWORD_IS_AUTO:
+            self.logger.info(f"Auto-generated web interface password: {WEBSERVER_PASSWORD}")
+            self.logger.info("Set STRMNTR_PASSWORD in your environment or parameters.py to customize this password")
 
         def check_auth(username, password):
             return WEBSERVER_PASSWORD == "" or (username == 'admin' and compare_digest(password, WEBSERVER_PASSWORD))

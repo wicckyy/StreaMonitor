@@ -84,6 +84,10 @@ WEB_THEATER_MODE = env.bool("STRMNTR_THEATER_MODE", False)
 # set to any other non-falsy value to always check
 WEB_CONFIRM_DELETES = env.str("STRMNTR_CONFIRM_DEL", "MOBILE")
 
+import secrets
+
 # Password for the web server
 # If empty no auth required, else username admin and choosen password
-WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", "admin")
+_default_password = secrets.token_urlsafe()
+WEBSERVER_PASSWORD = env.str("STRMNTR_PASSWORD", _default_password)
+WEBSERVER_PASSWORD_IS_AUTO = WEBSERVER_PASSWORD == _default_password
