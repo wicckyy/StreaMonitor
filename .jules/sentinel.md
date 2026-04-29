@@ -1,0 +1,4 @@
+## 2024-04-29 - [CRITICAL] Remove Hardcoded Default Admin Password
+**Vulnerability:** The application used "admin" as a hardcoded default password for the web interface, exposing instances to unauthorized access if users failed to manually configure a secure password.
+**Learning:** Default configuration for sensitive applications often lean towards ease-of-use (e.g. static simple credentials) over security, causing insecure deployments. In a web interface that monitors or controls stream capturing, unauthorized access is a critical risk.
+**Prevention:** Instead of falling back to a static, known string, missing configuration values for credentials should fall back to a securely generated random string (e.g. `secrets.token_urlsafe(16)`). The generated string should be logged to the console exactly once on startup to allow administrators access while blocking attackers.
