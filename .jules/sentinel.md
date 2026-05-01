@@ -1,0 +1,4 @@
+## 2024-05-01 - [Missing Authentication on Critical Routes]
+**Vulnerability:** Critical routes in the Flask web interface (`/video/<user>/<site>/<path:filename>` for downloading recordings and `/clear` for clearing UI modal states) were missing the `@login_required` decorator, allowing unauthorized users to access downloaded video files and modify application state.
+**Learning:** In Flask applications utilizing a custom authentication wrapper like `@login_required`, developers must manually ensure the decorator is applied to all sensitive endpoints. The omission on the `/video` endpoint directly exposed sensitive user data (recorded media) to any unauthenticated client if the webserver port is accessible.
+**Prevention:** Establish a default-deny pattern or enforce route authorization checks using middleware (like a `before_request` hook) rather than relying exclusively on manually applying decorators to individual endpoints, which is prone to human error.
