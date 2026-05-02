@@ -1,0 +1,4 @@
+## 2024-05-28 - [Missing Authentication on Sensitive Endpoints]
+**Vulnerability:** Found `clear_modal` (`/clear`) and `get_video` (`/video/<user>/<site>/<path:filename>`) endpoints in the HTTP manager missing `@login_required` decorators, exposing sensitive data and state-altering actions without authentication.
+**Learning:** In Flask web interfaces, `@app.route` handlers for data-exposing routes (`send_from_directory`) and state-altering routes (`DELETE` methods) must be verified explicitly for custom `@login_required` decorator inclusion. This codebase relies on stacking a custom decorator to secure endpoints.
+**Prevention:** Apply an audit checklist that ensures all Flask `@app.route` handlers, especially those not serving static site assets blindly, properly include `@login_required` underneath them.
