@@ -164,6 +164,7 @@ class HTTPManager(Manager):
             return render_template('recordings.html.jinja', **context), status_code
 
         @app.route('/video/<user>/<site>/<path:filename>', methods=['GET'])
+        @login_required
         def get_video(user, site, filename):
             streamer = cast(Union[Bot, None], self.getStreamer(user, site))
             return send_from_directory(
@@ -315,6 +316,7 @@ class HTTPManager(Manager):
             return '', status_code
 
         @app.route("/clear", methods=['DELETE'])
+        @login_required
         def clear_modal():
             return '', 204
 
