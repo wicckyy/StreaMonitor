@@ -1,0 +1,4 @@
+## 2024-05-18 - Missing Authentication on Sensitive Endpoints
+**Vulnerability:** The `/video/<user>/<site>/<path:filename>` and `/clear` endpoints were missing the `@login_required` decorator, potentially allowing unauthorized access to recorded videos and unauthorized state changes.
+**Learning:** In Flask applications where an explicit list of routes requires protection, any new or modified route must be carefully reviewed to ensure it inherits the correct authorization wrapper, especially those exposing sensitive media or enabling state-altering actions.
+**Prevention:** Establish a default-deny policy or use a blueprint-wide `before_request` handler to enforce authentication globally, excluding specific public routes, instead of relying on a decorator per route. Always explicitly test endpoints for unauthorized access.
